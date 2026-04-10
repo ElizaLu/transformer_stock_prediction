@@ -120,7 +120,7 @@ class TAttention(nn.Module):
 
         dim = int(self.d_model / self.nhead)
         att_output = []
-        for i in range(self.nhead):
+        for i in range(self.nhead):# 多头注意力机制
             if i==self.nhead-1:
                 qh = q[:, :, i * dim:]
                 kh = k[:, :, i * dim:]
@@ -130,12 +130,13 @@ class TAttention(nn.Module):
                 kh = k[:, :, i * dim:(i + 1) * dim]
                 vh = v[:, :, i * dim:(i + 1) * dim]
             atten_ave_matrixh = torch.softmax(torch.matmul(qh, kh.transpose(1, 2)), dim=-1)
+            # 点积，计算距离
             if self.attn_dropout:
                 atten_ave_matrixh = self.attn_dropout[i](atten_ave_matrixh)
             att_output.append(torch.matmul(atten_ave_matrixh, vh))
         att_output = torch.concat(att_output, dim=-1)
 
-        # FFN
+        # FFN feedforward network, 先残差连接，再LayerNorm，最后FFN
         xt = x + att_output
         xt = self.norm2(xt)
         att_output = xt + self.ffn(xt)
@@ -153,7 +154,7 @@ class Gate(nn.Module):
     def forward(self, gate_input):
         output = self.trans(gate_input)
         output = torch.softmax(output/self.t, dim=-1)
-        return self.d_output*output
+        return self.d_output*output # 防止梯度消失，放大输出值的范围
 
 
 class TemporalAttention(nn.Module):
@@ -172,6 +173,7 @@ class TemporalAttention(nn.Module):
 
 class MASTER(nn.Module):
     def __init__(self, d_feat, d_model, t_nhead, s_nhead, T_dropout_rate, S_dropout_rate, gate_input_start_index, gate_input_end_index, beta):
+        # gate_input_start_index == d_feat必须满足
         super(MASTER, self).__init__()
         # market
         self.gate_input_start_index = gate_input_start_index
@@ -183,9 +185,9 @@ class MASTER(nn.Module):
             # feature layer
             nn.Linear(d_feat, d_model),
             PositionalEncoding(d_model),
-            # intra-stock aggregation
+            # intra-stock aggregation（时间维）
             TAttention(d_model=d_model, nhead=t_nhead, dropout=T_dropout_rate),
-            # inter-stock aggregation
+            # inter-stock aggregation（股票维，即批次维）
             SAttention(d_model=d_model, nhead=s_nhead, dropout=S_dropout_rate),
             TemporalAttention(d_model=d_model),
             # decoder
@@ -193,8 +195,8 @@ class MASTER(nn.Module):
         )
 
     def forward(self, x):
-        src = x[:, :, :self.gate_input_start_index] # N, T, D
-        gate_input = x[:, -1, self.gate_input_start_index:self.gate_input_end_index]
+        src = x[:, :, :self.gate_input_start_index] # N, T, D，主特征：真正输入模型的特征
+        gate_input = x[:, -1, self.gate_input_start_index:self.gate_input_end_index] # gate特征，类似注意力权重
         src = src * torch.unsqueeze(self.feature_gate(gate_input), dim=1)
        
         output = self.layers(src).squeeze(-1)

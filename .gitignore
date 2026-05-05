@@ -4,7 +4,7 @@ __pycache__/
 *.pth
 *.onnx
 *.log
-.env
+.venv/
 data/
 runs/
 .vscode/
